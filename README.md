@@ -18,6 +18,13 @@ circle of the cell that holds the ghost.
 +--------+--------+--------+--------+
 ```
 
+## Two ways to use it
+
+- **CLI** (`solver.py`) — run in Termux / any terminal against a file path.
+- **Web app** (`app.py`) — drag-and-drop a captcha, it auto-solves and shows the answer.
+
+The web app imports the same `solve()` from `solver.py`, so the solving logic is shared.
+
 ## How it works
 
 1. **Find the grid** — detects the largest square coloured region below the header.
@@ -28,40 +35,26 @@ circle of the cell that holds the ghost.
 4. **OCR the number** — the ghost cell's top-left circle is cropped, upscaled,
    binarised, and read with `pytesseract` (digits-only whitelist).
 
-## Install (Termux)
+---
+
+## CLI usage (Termux)
 
 ```bash
 pkg update && pkg upgrade -y
 pkg install python tesseract libjpeg-turbo libpng -y
 pip install opencv-python-headless numpy pytesseract
-```
 
-> On Termux use `opencv-python-headless` (the plain `opencv-python` needs a display).
-> On desktop Linux, either works.
-
-## Install (desktop)
-
-```bash
-# system tesseract binary first:
-#   Ubuntu/Debian:  sudo apt install tesseract-ocr
-#   macOS (brew):   brew install tesseract
-pip install -r requirements.txt
-```
-
-## Usage
-
-```bash
-# single image — give it the path to your captcha
 python solver.py /sdcard/Download/captcha.png
-
-# batch
-python solver.py cap1.png cap2.png cap3.png
-
-# debug mode dumps the detected grid / ghost cell / circle crop into ./debug
-python solver.py --debug captcha.png
 ```
 
-### Example output
+Batch and debug:
+
+```bash
+python solver.py cap1.png cap2.png cap3.png
+python solver.py --debug captcha.png   # dumps crops to ./debug
+```
+
+Example output:
 
 ```
 captcha1.png  ->  answer: 18  (cell r3 c2, score=...)
@@ -69,13 +62,64 @@ captcha2.png  ->  answer: 90  (cell r3 c1, score=...)
 captcha3.png  ->  answer: 55  (cell r0 c3, score=...)
 ```
 
-## Verified answers for the sample captchas
+---
 
-| Sample     | Ghost location         | Answer |
-|------------|------------------------|--------|
-| captcha 1  | bottom row, 3rd column | **18** |
-| captcha 2  | bottom row, 2nd column | **90** |
-| captcha 3  | top row, 4th column     | **55** |
+## Web app (local)
+
+```bash
+pip install -r requirements.txt
+# needs the tesseract binary installed (see below)
+python app.py
+# open http://localhost:8000
+```
+
+Drop a captcha image into the box — it uploads, solves, and shows the number instantly.
+No button to click.
+
+### API
+
+`POST /solve` with multipart form field `image` returns:
+
+```json
+{ "answer": "18", "cell": { "row": 3, "col": 2 }, "score": 1234 }
+```
+
+`GET /health` returns `{"status":"ok"}` (used by the Railway health check).
+
+---
+
+## Deploy to Railway (Docker)
+
+The repo ships a `Dockerfile` and `railway.json`, so Railway builds it with Docker and
+installs the tesseract binary automatically — no extra config needed.
+
+1. Push this repo to GitHub (already done).
+2. On [railway.app](https://railway.app): **New Project → Deploy from GitHub repo** → pick
+   `captcha-ghost-solver`.
+3. Railway detects the `Dockerfile` and builds. It injects `$PORT` automatically — the
+   app already reads it.
+4. Once deployed, open the generated URL. Done.
+
+The health check hits `/health`; gunicorn serves the app with 2 workers.
+
+### Run the Docker image locally
+
+```bash
+docker build -t ghost-solver .
+docker run -p 8000:8000 ghost-solver
+# open http://localhost:8000
+```
+
+---
+
+## Install notes (desktop, non-Docker)
+
+```bash
+# system tesseract binary first:
+#   Ubuntu/Debian:  sudo apt install tesseract-ocr
+#   macOS (brew):   brew install tesseract
+pip install -r requirements.txt
+```
 
 ## Tuning
 
@@ -88,9 +132,11 @@ If a different captcha theme changes the colours, adjust the constants near the 
 
 ## Files
 
-- `solver.py` — the solver.
+- `solver.py` — the solver (CLI + shared `solve()` backend).
+- `app.py` — Flask web app.
+- `templates/index.html` — drag-and-drop UI.
+- `Dockerfile` / `railway.json` / `.dockerignore` — deployment.
 - `requirements.txt` — Python deps.
-- `samples/` — put your example captchas here.
 
 ## Notes
 
