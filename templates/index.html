@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>👻 Ghost Captcha Solver</title>
+  <style>
+    :root {
+      --teal: #16788a;
+      --teal-dark: #0f5a68;
+      --bg: #f2f5f7;
+      --card: #ffffff;
+      --accent: #1f9be0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: #1a2327;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 48px;
+    }
+    h1 {
+      color: var(--teal);
+      font-size: 1.6rem;
+      text-align: center;
+      margin: 8px 0 4px;
+    }
+    p.sub { color: #5a6b72; margin: 0 0 24px; text-align: center; font-size: .95rem; }
+    .card {
+      background: var(--card);
+      width: 100%;
+      max-width: 460px;
+      border-radius: 16px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.08);
+      padding: 24px;
+    }
+    #drop {
+      border: 2.5px dashed #b8c7cd;
+      border-radius: 14px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: .18s;
+      color: #6a7b82;
+    }
+    #drop.hover { border-color: var(--accent); background: #eef8fe; color: var(--accent); }
+    #drop .icon { font-size: 2.6rem; display: block; margin-bottom: 10px; }
+    #drop strong { color: var(--teal); }
+    input[type=file] { display: none; }
+    #preview {
+      margin-top: 18px;
+      display: none;
+      text-align: center;
+    }
+    #preview img {
+      max-width: 100%;
+      border-radius: 12px;
+      border: 1px solid #e2e8ea;
+    }
+    #status {
+      margin-top: 18px;
+      text-align: center;
+      font-size: .95rem;
+      color: #5a6b72;
+      min-height: 22px;
+    }
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 3px solid #cfe4ec;
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #result {
+      display: none;
+      margin-top: 20px;
+      text-align: center;
+      background: linear-gradient(135deg, var(--teal), var(--teal-dark));
+      color: #fff;
+      border-radius: 14px;
+      padding: 22px;
+    }
+    #result .label { font-size: .85rem; opacity: .85; letter-spacing: .5px; text-transform: uppercase; }
+    #result .num { font-size: 3.2rem; font-weight: 800; line-height: 1.1; margin: 6px 0; }
+    #result .meta { font-size: .8rem; opacity: .8; }
+    #error {
+      display: none;
+      margin-top: 18px;
+      background: #fdecec;
+      color: #b3261e;
+      border-radius: 12px;
+      padding: 14px 16px;
+      text-align: center;
+      font-size: .92rem;
+    }
+    footer { margin-top: 28px; color: #90a1a8; font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <h1>👻 Ghost Captcha Solver</h1>
+  <p class="sub">Drop a captcha image — it solves instantly.</p>
+
+  <div class="card">
+    <div id="drop">
+      <span class="icon">📥</span>
+      <div>Drag &amp; drop or <strong>tap to choose</strong> a captcha image</div>
+      <div style="font-size:.8rem;margin-top:6px;opacity:.7;">PNG · JPG · WEBP</div>
+    </div>
+    <input type="file" id="file" accept="image/*" />
+
+    <div id="preview"><img id="previewImg" alt="preview" /></div>
+    <div id="status"></div>
+    <div id="result">
+      <div class="label">Correct answer</div>
+      <div class="num" id="answer">–</div>
+      <div class="meta" id="meta"></div>
+    </div>
+    <div id="error"></div>
+  </div>
+
+  <footer>Ghost-grid CV + OCR · self-hosted</footer>
+
+  <script>
+    const drop = document.getElementById("drop");
+    const fileInput = document.getElementById("file");
+    const preview = document.getElementById("preview");
+    const previewImg = document.getElementById("previewImg");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const answerEl = document.getElementById("answer");
+    const metaEl = document.getElementById("meta");
+    const errorEl = document.getElementById("error");
+
+    drop.addEventListener("click", () => fileInput.click());
+    ["dragenter", "dragover"].forEach(ev =>
+      drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hover"); })
+    );
+    ["dragleave", "drop"].forEach(ev =>
+      drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("hover"); })
+    );
+    drop.addEventListener("drop", e => {
+      const f = e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+    fileInput.addEventListener("change", e => {
+      const f = e.target.files[0];
+      if (f) handleFile(f);
+    });
+
+    function reset() {
+      resultEl.style.display = "none";
+      errorEl.style.display = "none";
+    }
+
+    function handleFile(file) {
+      reset();
+      previewImg.src = URL.createObjectURL(file);
+      preview.style.display = "block";
+      statusEl.innerHTML = '<span class="spinner"></span>Processing captcha…';
+
+      const fd = new FormData();
+      fd.append("image", file);
+
+      fetch("/solve", { method: "POST", body: fd })
+        .then(async r => {
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || "Failed to solve.");
+          return data;
+        })
+        .then(data => {
+          statusEl.textContent = "";
+          answerEl.textContent = data.answer;
+          metaEl.textContent = `ghost at row ${data.cell.row + 1}, col ${data.cell.col + 1}`;
+          resultEl.style.display = "block";
+        })
+        .catch(err => {
+          statusEl.textContent = "";
+          errorEl.textContent = err.message;
+          errorEl.style.display = "block";
+        });
+    }
+  </script>
+</body>
+</html>
