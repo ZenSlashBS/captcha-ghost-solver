@@ -4,7 +4,7 @@ import tempfile
 
 from flask import Flask, request, jsonify, render_template
 
-from solver import solve
+from solver import solve, VERSION
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB upload cap
@@ -14,7 +14,7 @@ ALLOWED = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=VERSION)
 
 
 @app.route("/solve", methods=["POST"])
@@ -54,12 +54,18 @@ def solve_endpoint():
         "answer": answer,
         "cell": {"row": result["ghost_cell_row"], "col": result["ghost_cell_col"]},
         "score": result["ghost_score"],
+        "version": VERSION,
     })
+
+
+@app.route("/version")
+def version():
+    return jsonify({"version": VERSION})
 
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "version": VERSION})
 
 
 if __name__ == "__main__":
