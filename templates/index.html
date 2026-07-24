@@ -102,7 +102,8 @@
       text-align: center;
       font-size: .92rem;
     }
-    footer { margin-top: 28px; color: #90a1a8; font-size: .8rem; }
+    footer { margin-top: 28px; color: #90a1a8; font-size: .8rem; text-align: center; }
+    footer .ver { display: block; margin-top: 4px; font-size: .72rem; opacity: .8; }
   </style>
 </head>
 <body>
@@ -127,7 +128,10 @@
     <div id="error"></div>
   </div>
 
-  <footer>Ghost-grid CV + OCR · self-hosted</footer>
+  <footer>
+    Ghost-grid CV + OCR · self-hosted
+    <span class="ver">version {{ version }}</span>
+  </footer>
 
   <script>
     const drop = document.getElementById("drop");
