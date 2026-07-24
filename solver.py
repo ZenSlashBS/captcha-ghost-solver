@@ -13,7 +13,8 @@ Pipeline
 2. Split it into a 4x4 matrix of cells.
 3. Detect which cell holds the ghost (white line-art, circle region masked out).
 4. Find the white number-circle inside that cell precisely (contour), then OCR
-   the digits with several preprocessing passes until one yields digits.
+   the digits with several preprocessing passes; a two-digit rescue splits the
+   crop into per-digit blobs so a thin leading "1" (e.g. 18 -> 8) isn't lost.
 
 Usage
 -----
@@ -173,9 +174,12 @@ def extract_circle(cell):
 
     if best is not None:
         x, y, bw, bh = best
-        pad = int(0.12 * max(bw, bh))
-        x0, y0 = max(0, x - pad), max(0, y - pad)
-        x1, y1 = min(sx, x + bw + pad), min(sy, y + bh + pad)
+        # Generous padding, biased wider horizontally so a thin leading "1"
+        # at the circle edge is never clipped out of the crop.
+        pad_x = int(0.30 * max(bw, bh))
+        pad_y = int(0.18 * max(bw, bh))
+        x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
+        x1, y1 = min(sx, x + bw + pad_x), min(sy, y + bh + pad_y)
         return region[y0:y1, x0:x1]
 
     return region  # fallback: whole search region
@@ -203,7 +207,9 @@ def _ocr_variants(gray):
 def ocr_number(circle_img):
     """
     Read digits from the circle crop. Tries multiple upscales, binarisations,
-    and tesseract page-segmentation modes; returns the most-voted result.
+    and tesseract page-segmentation modes; returns the most-voted result. If the
+    winner is a single digit, a per-digit split pass rescues clipped 2-digit
+    numbers (e.g. 18 misread as 8).
     """
     if pytesseract is None:
         raise RuntimeError(
@@ -231,7 +237,59 @@ def ocr_number(circle_img):
     if not candidates:
         return ""
     # Most-voted reading wins; ties broken by longer (2-digit) numbers.
-    return max(candidates, key=lambda d: (candidates[d], len(d)))
+    best = max(candidates, key=lambda d: (candidates[d], len(d)))
+
+    # Rescue: if the winning reading is a single digit, the crop may have clipped
+    # or merged a thin leading "1". Re-check by splitting into per-digit blobs and
+    # OCR'ing each separately; prefer a 2-digit reading when it is well supported.
+    if len(best) == 1:
+        split = _ocr_by_digit_split(base, whitelist)
+        if split and len(split) == 2:
+            return split
+    return best
+
+
+def _ocr_by_digit_split(base_gray, whitelist):
+    """
+    Segment the crop into individual digit blobs left-to-right and OCR each one.
+    Returns the concatenated digits, or "" if segmentation is unconvincing.
+    Fixes cases like "18" read as "8" when the "1" sits at the crop edge.
+    """
+    up = cv2.resize(base_gray, None, fx=6, fy=6, interpolation=cv2.INTER_CUBIC)
+    _, bw = cv2.threshold(up, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Want dark digits on white -> invert so digits are white for contouring.
+    if np.mean(bw) < 127:
+        bw = cv2.bitwise_not(bw)
+    digits_fg = cv2.bitwise_not(bw)  # digits = white on black
+
+    contours, _ = cv2.findContours(
+        digits_fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    h, w = digits_fg.shape[:2]
+    boxes = []
+    for c in contours:
+        x, y, cw, ch = cv2.boundingRect(c)
+        # Keep blobs that look like a digit: tall enough, not tiny noise, not the
+        # whole circle ring.
+        if ch > 0.35 * h and cw < 0.8 * w and cw * ch > 0.01 * w * h:
+            boxes.append((x, y, cw, ch))
+
+    if not (1 <= len(boxes) <= 3):
+        return ""
+
+    boxes.sort(key=lambda b: b[0])  # left to right
+    out = ""
+    for (x, y, cw, ch) in boxes:
+        pad = 6
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1, y1 = min(w, x + cw + pad), min(h, y + ch + pad)
+        glyph = bw[y0:y1, x0:x1]
+        glyph = cv2.copyMakeBorder(glyph, 12, 12, 12, 12, cv2.BORDER_CONSTANT, value=255)
+        text = pytesseract.image_to_string(glyph, config=f"--psm 10 {whitelist}")
+        d = "".join(ch2 for ch2 in text if ch2.isdigit())
+        if len(d) == 1:
+            out += d
+    return out
 
 
 # ---------------------------------------------------------------------------
